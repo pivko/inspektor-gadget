@@ -19,9 +19,10 @@ var deployCmd = &cobra.Command{
 var gadgetimage = "undefined"
 
 var (
-	image         string
-	traceloop     bool
-	runcHooksMode string
+	image             string
+	traceloop         bool
+	traceloopLoglevel string
+	runcHooksMode     string
 )
 
 func init() {
@@ -35,6 +36,11 @@ func init() {
 		"traceloop", "",
 		true,
 		"enable the traceloop gadget")
+	deployCmd.PersistentFlags().StringVarP(
+		&traceloopLoglevel,
+		"traceloop-loglevel", "",
+		"info,json",
+		"loglevel (trace, debug, info, warn, error, fatal, panic, json, color, nocolor)")
 	deployCmd.PersistentFlags().StringVarP(
 		&runcHooksMode,
 		"runc-hooks-mode", "",
@@ -119,6 +125,8 @@ spec:
             value: {{.Version}}
           - name: INSPEKTOR_GADGET_OPTION_TRACELOOP
             value: "{{.Traceloop}}"
+          - name: INSPEKTOR_GADGET_OPTION_TRACELOOP_LOGLEVEL
+            value: "{{.TraceloopLoglevel}}"
           - name: INSPEKTOR_GADGET_OPTION_RUNC_HOOKS_MODE
             value: "{{.RuncHooksMode}}"
         securityContext:
@@ -169,10 +177,11 @@ spec:
 `
 
 type parameters struct {
-	Image         string
-	Version       string
-	Traceloop     bool
-	RuncHooksMode string
+	Image             string
+	Version           string
+	Traceloop         bool
+	TraceloopLoglevel string
+	RuncHooksMode     string
 }
 
 func runDeploy(cmd *cobra.Command, args []string) error {
@@ -192,6 +201,7 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 		image,
 		version,
 		traceloop,
+		traceloopLoglevel,
 		runcHooksMode,
 	}
 
