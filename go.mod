@@ -14,12 +14,12 @@ require (
 	github.com/spf13/viper v1.3.2
 	github.com/syndtr/gocapability v0.0.0-20180916011248-d98352740cb2
 	github.com/weaveworks/tcptracer-bpf v0.0.0-20190731111909-cd53e7c84bac
-	golang.org/x/net v0.0.0-20191004110552-13f9640d40b9
 	google.golang.org/grpc v1.27.0
 	google.golang.org/protobuf v1.24.0
 	k8s.io/api v0.17.4
 	k8s.io/apimachinery v0.17.4
 	k8s.io/client-go v12.0.0+incompatible
+	k8s.io/cri-api v0.17.4
 	sigs.k8s.io/yaml v1.1.0
 )
 

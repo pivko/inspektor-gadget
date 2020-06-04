@@ -2,17 +2,24 @@ package containerutils
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"syscall"
+	"time"
 	"unsafe"
 
 	ocispec "github.com/opencontainers/runtime-spec/specs-go"
+
+	"google.golang.org/grpc"
+	pb "k8s.io/cri-api/pkg/apis/runtime/v1alpha2"
 )
 
 /*
@@ -57,6 +64,12 @@ uint64_t get_cgroupid(char *path) {
 }
 */
 import "C"
+
+const (
+	CONTAINERD_DEFAULT_SOCKET_PATH  = "/run/containerd/containerd.sock"
+	CRIO_DEFAULT_SOCKET_PATH        = "/run/crio/crio.sock"
+	DOCKER_SHIM_DEFAULT_SOCKER_PATH = "/var/run/dockershim.sock"
+)
 
 func CgroupPathV2AddMountpoint(path string) (string, error) {
 	pathWithMountpoint := filepath.Join("/sys/fs/cgroup/unified", path)
@@ -156,43 +169,69 @@ func PidFromContainerId(containerID string) (int, error) {
 		}
 		return dockerInspect[0].State.Pid, nil
 	} else if strings.HasPrefix(containerID, "cri-o://") {
-		out, err := exec.Command("chroot", "/host", "crictl", "inspect", strings.TrimPrefix(containerID, "cri-o://")).Output()
+		IDWithoutPrefix := strings.TrimPrefix(containerID, "cri-o://")
+		r, err := getContainerStatus(CRIO_DEFAULT_SOCKET_PATH, IDWithoutPrefix)
 		if err != nil {
 			return -1, err
 		}
-		type CRIOInspect struct {
-			Pid int
+		pidStr, ok := r.Info["pid"]
+		if !ok {
+			return -1, fmt.Errorf("container status reply from runtime doesn't contain 'pid'")
 		}
-		var crioInspect CRIOInspect
-		err = json.Unmarshal(out, &crioInspect)
+
+		pid, err := strconv.Atoi(pidStr)
 		if err != nil {
 			return -1, err
 		}
-		if crioInspect.Pid == 0 {
-			return -1, fmt.Errorf("invalid pid")
-		}
-		return crioInspect.Pid, nil
+
+		return pid, nil
 	} else if strings.HasPrefix(containerID, "containerd://") {
-		out, err := exec.Command("chroot", "/host", "crictl", "inspect", strings.TrimPrefix(containerID, "containerd://")).Output()
+		IDWithoutPrefix := strings.TrimPrefix(containerID, "containerd://")
+		r, err := getContainerStatus(CONTAINERD_DEFAULT_SOCKET_PATH, IDWithoutPrefix)
 		if err != nil {
 			return -1, err
 		}
-		type ContainerdInspect struct {
-			Info struct {
-				Pid int
-			}
+		info, ok := r.Info["info"]
+		if !ok {
+			return -1, fmt.Errorf("container status reply from runtime doesn't contain 'info'")
 		}
-		var containerdInspect ContainerdInspect
-		err = json.Unmarshal(out, &containerdInspect)
-		if err != nil {
+
+		containerdInspect := struct{ Pid int }{}
+		if err := json.Unmarshal([]byte(info), &containerdInspect); err != nil {
 			return -1, err
 		}
-		if containerdInspect.Info.Pid == 0 {
+
+		if containerdInspect.Pid == 0 {
 			return -1, fmt.Errorf("invalid pid")
 		}
-		return containerdInspect.Info.Pid, nil
+		return containerdInspect.Pid, nil
 	}
 	return -1, fmt.Errorf("unknown container runtime: %s", containerID)
+}
+
+func getContainerStatus(sockPath string, containerdID string) (*pb.ContainerStatusResponse, error) {
+	conn, err := getConnection(sockPath)
+	if err != nil {
+		return nil, err
+	}
+
+	runtimeClient := pb.NewRuntimeServiceClient(conn)
+
+	request := &pb.ContainerStatusRequest{
+		ContainerId: containerdID,
+		Verbose:     true,
+	}
+
+	return runtimeClient.ContainerStatus(context.Background(), request)
+}
+
+func getConnection(path string) (*grpc.ClientConn, error) {
+	return grpc.Dial(
+		path,
+		grpc.WithInsecure(),
+		grpc.WithDialer(func(addr string, timeout time.Duration) (net.Conn, error) {
+			return net.DialTimeout("unix", path, 2*time.Second)
+		}))
 }
 
 func ParseOCIState(stateBuf []byte) (id string, pid int, err error) {
